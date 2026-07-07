@@ -4,7 +4,7 @@
  */
 "use strict";
 
-var CACHE_VERSION = "wciw-v5";
+var CACHE_VERSION = "wciw-v6";
 var APP_SHELL = [
   "./",
   "./index.html",

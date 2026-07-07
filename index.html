@@ -303,6 +303,15 @@ a { color: var(--accent); }
 var SUPABASE_URL = "https://uuypgsblattorvhovopd.supabase.co";
 var SUPABASE_ANON_KEY = "sb_publishable_hcOqXW-Nv5G2DraZiRgrXA_GFF7jhY5";
 
+/* Natalie's own TMDB key, embedded so a fresh device skips the first-run key
+   screen (same idea as the Supabase key above). This is PUBLIC in the repo —
+   TMDB v3 keys / v4 tokens are free, read-only and rate-limited, so it's an
+   accepted trade. A key typed into Settings or synced from the cloud profile
+   still takes precedence over this (see boot() — it only seeds when nothing
+   local is set). Paste a v3 API key or a v4 Read Access Token between the quotes;
+   leave it "" to fall back to the old first-run/sync behaviour. */
+var TMDB_KEY = "076603888eccb81654a8a6f299a97e53";
+
 /* ============ Constants & Storage ============ */
 var K = {
   apiKey: "wciw.apiKey",
@@ -1618,6 +1627,9 @@ function cleanAuthHash() {
 
 /* ============ Boot ============ */
 function boot() {
+  // Seed the embedded TMDB key on a fresh device — only when nothing is stored
+  // locally yet, so a user-entered or cloud-synced key always wins.
+  if (TMDB_KEY && !load(K.apiKey, "")) save(K.apiKey, TMDB_KEY);
   if (!load(K.apiKey, "")) {
     // Even with no TMDB key yet, we may be mid auth-callback or already signed in.
     Cloud.init();
