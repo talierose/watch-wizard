@@ -164,6 +164,11 @@ a { color: var(--accent); }
 .detail-poster { width: 120px; border-radius: 16px; flex-shrink: 0; box-shadow: var(--shadow); object-fit: cover; background: var(--bg-elev-2); }
 .detail-poster.placeholder { height: 180px; display: flex; align-items: center; justify-content: center; font-size: 40px; }
 .detail-title { font-size: 24px; font-weight: 800; letter-spacing: -0.02em; margin: 0 0 4px; }
+/* Title links to TMDB but keeps the heading look — inherits colour, subtle ↗ + hover underline. */
+.title-link { color: inherit; text-decoration: none; }
+.title-link:hover { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--accent); }
+.title-link .ext { font-size: 0.6em; color: var(--text-faint); margin-left: 5px; vertical-align: middle; font-weight: 600; }
+.title-link:hover .ext { color: var(--accent); }
 .detail-overview { color: var(--text-dim); font-size: 14px; margin-top: 10px; }
 .summary-line {
   padding: 16px 18px; border-radius: var(--radius); margin-bottom: 22px; font-weight: 600; font-size: 15.5px;
@@ -175,17 +180,20 @@ a { color: var(--accent); }
 
 .prov-group { margin-bottom: 24px; }
 .prov-group h4 { font-size: 12.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-faint); margin: 0 0 12px; font-weight: 700; }
-.prov-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+.prov-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; }
+/* Provider card: logo | name+labels(+owned chip) | watch button, laid out with flex.
+   Everything is in normal flow (no absolute positioning) so nothing overlaps at any width. */
 .prov-card {
   display: flex; align-items: center; gap: 12px; padding: 14px; border-radius: var(--radius-sm);
-  border: 1px solid var(--border); background: var(--bg-elev); position: relative; box-shadow: var(--shadow);
+  border: 1px solid var(--border); background: var(--bg-elev); box-shadow: var(--shadow);
 }
 .prov-card.owned { border-color: var(--green); box-shadow: 0 0 0 2px var(--green-dim); }
 .prov-logo { width: 52px; height: 52px; border-radius: 14px; object-fit: cover; flex-shrink: 0; background: var(--bg-elev-2); }
-.prov-name { font-weight: 600; font-size: 14.5px; line-height: 1.25; }
+.prov-info { flex: 1 1 auto; min-width: 0; }   /* grows/shrinks; min-width:0 lets long names wrap instead of pushing siblings */
+.prov-name { font-weight: 600; font-size: 14.5px; line-height: 1.25; overflow-wrap: anywhere; }
 .prov-labels { font-size: 11.5px; color: var(--text-dim); margin-top: 3px; }
-.have-chip { position: absolute; top: 6px; right: 6px; background: var(--green); color: #fff; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 999px; }
-.prov-watch-btn { margin-left: auto; }
+.have-chip { display: inline-block; background: var(--green); color: #fff; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 999px; margin-top: 6px; }
+.prov-watch-btn { flex-shrink: 0; white-space: nowrap; padding-left: 14px; padding-right: 14px; }
 
 /* Services */
 .svc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
@@ -277,6 +285,8 @@ a { color: var(--accent); }
   .detail-hero { flex-direction: column; }
   .detail-poster { width: 100px; }
   .brand { font-size: 17px; }
+  /* One provider card per row on narrow phones so name + button always have room. */
+  .prov-grid { grid-template-columns: 1fr; }
 }
 </style>
 </head>
@@ -285,6 +295,14 @@ a { color: var(--accent); }
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 "use strict";
+/* ============ Supabase (built in) ============ */
+/* Natalie's own Watch Wizard Supabase project — hard-coded so cloud sync is always
+   configured. The anon/publishable key is safe to ship in the browser; row-level
+   security (see supabase-schema.sql) is the actual boundary. These constants take
+   precedence over any old per-device values that were once typed into Settings. */
+var SUPABASE_URL = "https://uuypgsblattorvhovopd.supabase.co";
+var SUPABASE_ANON_KEY = "sb_publishable_hcOqXW-Nv5G2DraZiRgrXA_GFF7jhY5";
+
 /* ============ Constants & Storage ============ */
 var K = {
   apiKey: "wciw.apiKey",
@@ -292,8 +310,8 @@ var K = {
   history: "wciw.history",     // [ {tmdbId,title,mediaType,providerId,providerName,date,bucket} ]
   theme: "wciw.theme",         // "light" | "dark" | "auto"
   region: "wciw.region",       // fixed "GB"
-  supaUrl: "wciw.supaUrl",     // Supabase project URL (per device)
-  supaAnon: "wciw.supaAnon",   // Supabase anon (public) key (per device)
+  supaUrl: "wciw.supaUrl",     // LEGACY: once-typed Supabase URL; now built in, cleaned up on init
+  supaAnon: "wciw.supaAnon",   // LEGACY: once-typed anon key; now built in, cleaned up on init
   pendingOps: "wciw.pendingOps" // offline write queue [ {op, ...} ]
 };
 var IMG = "https://image.tmdb.org/t/p/";
@@ -441,9 +459,9 @@ function updateSyncPill() {
   var pill = $("#syncPill"); if (!pill) return;
   pill.classList.remove("synced", "offline");
   var label = pill.querySelector(".sync-label");
-  if (!Cloud.isConfigured()) {
+  if (!Cloud.isConfigured() || !Cloud.libAvailable()) {
     if (label) label.textContent = "Local only";
-    pill.title = "Cloud sync is off. Tap to set up syncing across devices.";
+    pill.title = "Cloud sync couldn’t load (offline or blocked). The app still works locally.";
   } else if (!Cloud.user) {
     if (label) label.textContent = "Sign in";
     pill.title = "Cloud sync configured. Tap to sign in.";
@@ -480,19 +498,26 @@ var Cloud = {
   user: null,
   offline: false,
 
-  isConfigured: function () { return !!(load(K.supaUrl, "") && load(K.supaAnon, "")); },
+  /* Cloud sync is always configured now — the URL + anon key are built in.
+     (This still guards against a blank build so the rest of the code is safe.) */
+  isConfigured: function () { return !!(SUPABASE_URL && SUPABASE_ANON_KEY); },
 
   libAvailable: function () { return typeof window.supabase !== "undefined" && !!window.supabase.createClient; },
 
   /* Return the current page URL with any hash stripped (magic-link redirect target). */
   redirectUrl: function () { return location.origin + location.pathname + location.search; },
 
-  /* Initialise the client from stored creds. Returns true if a client exists. */
+  /* Initialise the client from the built-in creds. Returns true if a client exists.
+     Old per-device values that were once typed into Settings are cleaned up here so
+     the embedded constants always win. */
   init: function () {
     Cloud.client = null; Cloud.user = null;
+    if (load(K.supaUrl, null) != null || load(K.supaAnon, null) != null) {
+      localStorage.removeItem(K.supaUrl); localStorage.removeItem(K.supaAnon);
+    }
     if (!Cloud.isConfigured() || !Cloud.libAvailable()) return false;
     try {
-      Cloud.client = window.supabase.createClient(load(K.supaUrl, ""), load(K.supaAnon, ""), {
+      Cloud.client = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
         auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
       });
     } catch (e) { Cloud.client = null; return false; }
@@ -753,7 +778,7 @@ function renderSetup() {
     '<button class="btn" id="testBtn">Test my key</button>' +
     '<button class="btn btn-primary" id="saveKeyBtn">Let\'s go ✨</button>' +
     '</div>' +
-    '<p class="hint" style="margin-top:16px;">Your key stays snug in this browser (localStorage) and is only ever sent straight to TMDB. Region is set to <b>United Kingdom (GB)</b>. You can switch on optional <b>cloud sync</b> any time in Settings.</p>' +
+    '<p class="hint" style="margin-top:16px;">Your key stays snug in this browser (localStorage) and is only ever sent straight to TMDB. Region is set to <b>United Kingdom (GB)</b>. <b>Cloud sync</b> is already set up — just sign in with a magic link (in ⚙️ Settings) to keep everything in step across your devices.</p>' +
     '</div></div>'
   );
   app.appendChild(wrap);
@@ -896,62 +921,28 @@ function openSettings() {
   renderCloudBox($("#cloudBox", m), close);
 }
 
-/* Cloud-sync section inside Settings. */
+/* Cloud-sync section inside Settings. Cloud sync is always configured (creds are
+   built in) — so the only step here is a magic-link sign-in. */
 function renderCloudBox(box, closeModal) {
   box.innerHTML = "";
-  var configured = Cloud.isConfigured();
+
+  function supaStatus(ok, msg) { var s = $("#supaStatus", box); if (!s) return; s.className = "status-msg " + (ok ? "ok" : "err"); s.textContent = msg; }
 
   if (!Cloud.libAvailable()) {
     box.appendChild(el('<p class="hint" style="margin:0;">Cloud sync library couldn’t load (offline or blocked). The app still works locally. Reconnect and reload to enable syncing.</p>'));
     return;
   }
 
-  // ---- Connection credentials ----
-  var creds = el(
-    '<div>' +
-    '<p class="hint" style="margin:0 0 10px;">Keep your services, watch history and TMDB key in step across all your devices with a free Supabase project. Just pop in your project URL and anon (public) key once per device.</p>' +
-    '<label class="field-label" for="supaUrl">Supabase project URL</label>' +
-    '<input type="url" id="supaUrl" placeholder="https://xxxx.supabase.co" autocomplete="off" />' +
-    '<label class="field-label" for="supaAnon" style="margin-top:10px;">Supabase anon (public) key</label>' +
-    '<input type="password" id="supaAnon" placeholder="eyJhbGciOi…" autocomplete="off" />' +
-    '<div class="row-btns"><button class="btn btn-sm btn-primary" id="supaSave">Save connection</button>' +
-    (configured ? '<button class="btn btn-sm btn-danger" id="supaForget">Disconnect</button>' : '') +
-    '</div>' +
-    '<div class="status-msg" id="supaStatus"></div>' +
-    '</div>'
-  );
-  box.appendChild(creds);
-  $("#supaUrl", box).value = load(K.supaUrl, "");
-  $("#supaAnon", box).value = load(K.supaAnon, "");
-  function supaStatus(ok, msg) { var s = $("#supaStatus", box); s.className = "status-msg " + (ok ? "ok" : "err"); s.textContent = msg; }
+  // Cloud is always configured; make sure a client exists.
+  if (!Cloud.client) Cloud.init();
 
-  $("#supaSave", box).onclick = function () {
-    var u = $("#supaUrl", box).value.trim().replace(/\/+$/, "");
-    var a = $("#supaAnon", box).value.trim();
-    if (!u || !a) { supaStatus(false, "Enter both the URL and the anon key."); return; }
-    if (!/^https:\/\/.+\.supabase\.(co|in)/.test(u)) { supaStatus(false, "That doesn’t look like a Supabase URL (https://xxxx.supabase.co)."); return; }
-    save(K.supaUrl, u); save(K.supaAnon, a);
-    if (Cloud.init()) {
-      supaStatus(true, "✓ Connection saved. Now sign in below.");
-      Cloud.refreshUser().then(function () { renderCloudBox(box, closeModal); updateSyncPill(); });
-    } else {
-      supaStatus(false, "Couldn’t initialise — double-check the values.");
-    }
-  };
-  var forget = $("#supaForget", box);
-  if (forget) forget.onclick = function () {
-    if (!confirm("Disconnect cloud sync on this device? Your local data stays; cloud data is untouched.")) return;
-    Cloud.signOut().finally(function () {
-      [K.supaUrl, K.supaAnon, K.pendingOps].forEach(function (k) { localStorage.removeItem(k); });
-      Cloud.client = null; Cloud.user = null; Cloud.offline = false;
-      updateSyncPill(); renderCloudBox(box, closeModal);
-    });
-  };
+  box.appendChild(el('<p class="hint" style="margin:0 0 12px;">Keep your services, watch history and TMDB key in step across all your devices. Just sign in with a magic link — no passwords, nothing to set up.</p>'));
+  box.appendChild(el('<div class="status-msg" id="supaStatus"></div>'));
 
-  if (!configured || !Cloud.client) return;
+  if (!Cloud.client) return;
 
   // ---- Auth state ----
-  var authWrap = el('<div style="margin-top:16px;padding-top:16px;border-top:1px dashed var(--border);"></div>');
+  var authWrap = el('<div></div>');
   box.appendChild(authWrap);
 
   if (Cloud.user) {
@@ -1156,9 +1147,11 @@ function renderDetail(view, d) {
     : '<div class="detail-poster placeholder">' + (d.mediaType === "tv" ? "📺" : "🎬") + '</div>';
   var badge = d.mediaType === "tv" ? '<span class="badge tv">TV</span>' : '<span class="badge movie">Film</span>';
 
+  var tmdbUrl = "https://www.themoviedb.org/" + (d.mediaType === "tv" ? "tv" : "movie") + "/" + encodeURIComponent(d.id);
+  var titleLink = '<a class="title-link" href="' + esc(tmdbUrl) + '" target="_blank" rel="noopener" title="View on TMDB">' + esc(title) + '<span class="ext" aria-hidden="true">↗</span></a>';
   var hero = el(
     '<div class="detail-hero">' + poster +
-    '<div><h2 class="detail-title">' + esc(title) + '</h2>' +
+    '<div><h2 class="detail-title">' + titleLink + '</h2>' +
     '<div class="result-sub">' + badge + (year ? '<span>' + esc(year) + '</span>' : '') + '</div>' +
     (info.overview ? '<p class="detail-overview">' + esc(info.overview) + '</p>' : '') +
     '</div></div>'
@@ -1244,10 +1237,11 @@ function providerCard(p, d, title, bucketKey) {
   labels = labels.filter(function (v, i) { return labels.indexOf(v) === i; });
   var card = el(
     '<div class="prov-card' + (owned ? ' owned' : '') + '">' +
-    (owned ? '<span class="have-chip">You\'ve got this ✓</span>' : '') +
     logo +
-    '<div style="min-width:0;"><div class="prov-name">' + esc(p.name) + '</div>' +
-    '<div class="prov-labels">' + esc(labels.join(" / ")) + '</div></div>' +
+    '<div class="prov-info"><div class="prov-name">' + esc(p.name) + '</div>' +
+    '<div class="prov-labels">' + esc(labels.join(" / ")) + '</div>' +
+    (owned ? '<span class="have-chip">You\'ve got this ✓</span>' : '') +
+    '</div>' +
     '</div>'
   );
   var wb = el('<button class="btn btn-sm prov-watch-btn" title="Log a watch on ' + esc(p.name) + '">✓ Watched</button>');
@@ -1547,9 +1541,16 @@ function renderStats(view) {
   var histCard = el('<div class="card" style="padding:6px 16px;"></div>');
   var sorted = entries.slice().sort(function (a, b) { return a.date < b.date ? 1 : -1; });
   sorted.forEach(function (h) {
+    var histTitle;
+    if (h.tmdbId != null && (h.mediaType === "tv" || h.mediaType === "movie")) {
+      var histUrl = "https://www.themoviedb.org/" + h.mediaType + "/" + encodeURIComponent(h.tmdbId);
+      histTitle = '<a class="title-link" href="' + esc(histUrl) + '" target="_blank" rel="noopener" title="View on TMDB">' + esc(h.title) + '<span class="ext" aria-hidden="true">↗</span></a>';
+    } else {
+      histTitle = esc(h.title);
+    }
     var row = el(
       '<div class="hist-row">' +
-      '<div><div class="h-title">' + esc(h.title) + '</div>' +
+      '<div><div class="h-title">' + histTitle + '</div>' +
       '<div class="h-meta">' + esc(fmtDate(h.date)) + ' · ' + esc(h.providerName || "Other") + ' · ' + esc(h.mediaType === "tv" ? "TV" : "Film") + '</div></div>' +
       '<button class="btn btn-sm btn-danger del">Delete</button>' +
       '</div>'
